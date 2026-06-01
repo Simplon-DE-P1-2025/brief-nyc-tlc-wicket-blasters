@@ -1,2 +1,12 @@
-venv
+# IMPORTANT : ne jamais committer le .env
+.env
+
+# Données locales (trop lourdes pour GitHub)
+nyc_taxi_data/
 *.parquet
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv
