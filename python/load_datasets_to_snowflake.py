@@ -2,7 +2,6 @@ import requests
 import snowflake.connector
 import tempfile
 import os
-from pathlib import Path
 from dotenv import load_dotenv
 
 # --- Chargement du .env ---
@@ -20,7 +19,6 @@ SNOWFLAKE_CONFIG = {
     "login_timeout":   60
 }
 
-# Vérifier que les variables critiques sont bien chargées
 missing = [k for k in ("account", "user", "password") if not SNOWFLAKE_CONFIG[k]]
 if missing:
     raise ValueError(f"❌ Variables manquantes dans le .env : {missing}")
@@ -36,9 +34,11 @@ print("✅ Connecté !\n")
 
 # --- Stage ---
 cursor.execute("""
-    CREATE STAGE IF NOT EXISTS NYC_TAXI_DB.RAW.tlc_stage
+    CREATE OR REPLACE STAGE NYC_TAXI_DB.RAW.tlc_stage
     FILE_FORMAT = (TYPE = 'PARQUET' SNAPPY_COMPRESSION = TRUE)
+    COMMENT = 'Stage interne - fichiers Parquet NYC Taxi'
 """)
+print("✅ Stage vérifié\n")
 
 # --- Téléchargement + Upload ---
 print(f"📦 {len(FILES)} fichiers à traiter\n")
@@ -49,47 +49,58 @@ for i, (year, month) in enumerate(FILES, 1):
 
     print(f"[{i}/{len(FILES)}] ⬇️  Téléchargement : {file_name}...")
 
-    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
-        tmp_path = tmp.name
-        try:
+    # Créer le fichier temporaire
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".parquet", dir=os.path.expanduser("~"))
+    print(os.path.exists(tmp_path))
+    print(os.path.getsize(tmp_path))
+    try:
+        # Télécharger dans le fichier temporaire
+        with os.fdopen(tmp_fd, 'wb') as tmp_file:
             response = requests.get(url, stream=True)
             response.raise_for_status()
             for chunk in response.iter_content(chunk_size=8192):
-                tmp.write(chunk)
-        except requests.HTTPError:
-            print(f"   ❌ Fichier non disponible, ignoré\n")
-            os.unlink(tmp_path)
+                tmp_file.write(chunk)
+
+        # Vérifier que le fichier n'est pas vide
+        size_mb = os.path.getsize(tmp_path) / 1_000_000
+        if size_mb < 1:
+            print(f"   ⚠️  Fichier trop petit ({size_mb:.1f} Mo), ignoré\n")
             continue
 
-    size_mb = os.path.getsize(tmp_path) / 1_000_000
-    print(f"   ⬆️  Upload vers Snowflake ({size_mb:.1f} Mo)...")
+        print(f"   ⬆️  Upload vers Snowflake ({size_mb:.1f} Mo)...")
 
-    cursor.execute(f"""
-        PUT file://{tmp_path}
-        @NYC_TAXI_DB.RAW.tlc_stage/{file_name}
-        PARALLEL = 8
-        AUTO_COMPRESS = FALSE
-        OVERWRITE = FALSE
-    """)
+        cursor.execute(f"""
+            PUT file://{tmp_path}
+            @NYC_TAXI_DB.RAW.tlc_stage/{file_name}
+            PARALLEL = 8
+            AUTO_COMPRESS = FALSE
+            OVERWRITE = TRUE
+        """)
 
-    result = cursor.fetchone()
-    status = result[6] if result else "unknown"
+        result = cursor.fetchone()
+        status = result[6] if result else "unknown"
 
-    os.unlink(tmp_path)
+        if "SKIPPED" in str(status).upper():
+            print(f"   ⏭️  Déjà présent, ignoré\n")
+        else:
+            print(f"   ✅ Uploadé ({size_mb:.1f} Mo)\n")
 
-    if "SKIPPED" in str(status).upper():
-        print(f"   ⏭️  Déjà présent, ignoré\n")
-    else:
-        print(f"   ✅ Uploadé ({size_mb:.1f} Mo)\n")
+    except requests.HTTPError:
+        print(f"   ❌ Fichier non disponible sur TLC, ignoré\n")
+
+    finally:
+        # Toujours supprimer le fichier temporaire, même en cas d'erreur
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 # --- Vérification finale ---
+print("🔍 Vérification du stage...\n")
 cursor.execute("LIST @NYC_TAXI_DB.RAW.tlc_stage")
 files_in_stage = cursor.fetchall()
 total_size     = sum(f[3] for f in files_in_stage) / 1_000_000
-
 print(f"📋 {len(files_in_stage)} fichiers dans le stage")
-print(f"💾 Taille totale : {total_size:.0f} Mo")
+print(f"💾 Taille totale : {total_size:.0f} Mo\n")
 
 cursor.close()
 conn.close()
-print("\n🎉 Terminé ! Lance CALL load_all_months() dans Snowsight.")
+print("🎉 Terminé ! Lance CALL load_all_months() dans Snowsight.")
