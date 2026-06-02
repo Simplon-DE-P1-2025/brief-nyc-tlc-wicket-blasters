@@ -2,6 +2,7 @@ import requests
 import snowflake.connector
 import tempfile
 import os
+import shutil
 import logging
 from dotenv import load_dotenv
 
@@ -85,11 +86,13 @@ for i, (year, month) in enumerate(FILES, 1):
 
     print(f"[{i}/{len(FILES)}] 📥 {file_name}")
 
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
+    # FIX : dossier temp + nom de fichier explicite (au lieu de mkstemp)
+    tmp_dir = tempfile.mkdtemp()
+    tmp_path = os.path.join(tmp_dir, file_name)
 
     try:
         # download
-        with os.fdopen(tmp_fd, "wb") as f:
+        with open(tmp_path, "wb") as f:
             r = requests.get(url, stream=True)
             r.raise_for_status()
 
@@ -104,10 +107,11 @@ for i, (year, month) in enumerate(FILES, 1):
             continue
 
         # upload stage
+        # FIX : PUT vers @STAGE sans sous-dossier → le fichier garde son nom
         print("   ⬆ upload stage...")
 
         cursor.execute(f"""
-        PUT file://{tmp_path} @{STAGE_NAME}/{file_name}
+        PUT file://{tmp_path} @{STAGE_NAME}
         AUTO_COMPRESS = FALSE
         OVERWRITE = TRUE
         """)
@@ -118,25 +122,41 @@ for i, (year, month) in enumerate(FILES, 1):
         print("   ❌ fichier introuvable TLC\n")
 
     finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
 
 # ============================================================
-# COPY INTO RAW TABLE (fichier par fichier)
+# COPY INTO RAW TABLE (fichier par fichier + métadonnées)
 # ============================================================
 
 print("📥 Chargement vers table RAW...\n")
 
-
+cursor.execute(f"LIST @{STAGE_NAME}")
 staged_files = cursor.fetchall()
 
-cursor.execute(f"""
-COPY INTO {TABLE_NAME}
-FROM @{STAGE_NAME}
-FILE_FORMAT = (TYPE = PARQUET  USE_LOGICAL_TYPE = TRUE)
-MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
-ON_ERROR = CONTINUE
-""")
+for row in staged_files:
+    staged_path = row[0]
+    file_name = staged_path.split("/")[-1]
+
+    print(f"   📄 COPY {file_name}...")
+
+    cursor.execute(f"""
+    COPY INTO {TABLE_NAME}
+    FROM @{STAGE_NAME}/{file_name}
+    FILE_FORMAT = (TYPE = PARQUET USE_LOGICAL_TYPE = TRUE)
+    MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
+    ON_ERROR = CONTINUE
+    """)
+
+    # Remplir les métadonnées pour les lignes qui viennent d'être chargées
+    cursor.execute(f"""
+    UPDATE {TABLE_NAME}
+    SET _SOURCE_FILE = '{file_name}',
+        _LOADED_AT   = CURRENT_TIMESTAMP()
+    WHERE _SOURCE_FILE IS NULL
+    """)
+
+    print(f"   ✅ {file_name} chargé + métadonnées OK")
 
 print("\n✅ Chargement terminé\n")
 
