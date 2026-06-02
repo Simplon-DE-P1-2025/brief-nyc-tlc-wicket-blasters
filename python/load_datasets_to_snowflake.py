@@ -2,7 +2,14 @@ import requests
 import snowflake.connector
 import tempfile
 import os
+import logging
 from dotenv import load_dotenv
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+logging.getLogger("snowflake.connector").setLevel(logging.WARNING)
 
 # ============================================================
 # CONFIG
@@ -18,7 +25,7 @@ SNOWFLAKE_CONFIG = {
     "database":  os.getenv("SNOWFLAKE_DATABASE", "NYC_TAXI_DB"),
     "schema":    os.getenv("SNOWFLAKE_SCHEMA", "RAW"),
     "role":      os.getenv("SNOWFLAKE_ROLE", "SYSADMIN"),
-    "network_timeout": 360,
+    "network_timeout": 900,
     "login_timeout": 60
 }
 
@@ -27,6 +34,8 @@ FILES = [(2024, m) for m in range(1, 13)] + [(2025, m) for m in range(1, 4)]
 
 STAGE_NAME = "NYC_TAXI_DB.RAW.TLC_STAGE"
 TABLE_NAME = "NYC_TAXI_DB.RAW.YELLOW_TAXI_TRIPS"
+
+FILE_FORMAT = "(TYPE = PARQUET USE_LOGICAL_TYPE = TRUE)"
 
 # ============================================================
 # CONNECTION
@@ -38,6 +47,18 @@ cursor = conn.cursor()
 print("✅ Connecté\n")
 
 # ============================================================
+# CLEANUP : TRUNCATE TABLE + PURGE STAGE
+# ============================================================
+
+print("🗑️ Truncate table RAW...")
+cursor.execute(f"TRUNCATE TABLE IF EXISTS {TABLE_NAME}")
+print("✅ Table vidée")
+
+print("🗑️ Purge du stage...")
+cursor.execute(f"REMOVE @{STAGE_NAME}")
+print("✅ Stage vidé\n")
+
+# ============================================================
 # CREATE STAGE (idempotent)
 # ============================================================
 
@@ -45,7 +66,7 @@ print("📦 Création / vérification du stage...")
 
 cursor.execute(f"""
 CREATE STAGE IF NOT EXISTS {STAGE_NAME}
-FILE_FORMAT = (TYPE = PARQUET)
+FILE_FORMAT = {FILE_FORMAT}
 COMMENT = 'Stage interne NYC Taxi'
 """)
 
@@ -65,7 +86,7 @@ for i, (year, month) in enumerate(FILES, 1):
     print(f"[{i}/{len(FILES)}] 📥 {file_name}")
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
-    
+
     try:
         # download
         with os.fdopen(tmp_fd, "wb") as f:
@@ -101,21 +122,23 @@ for i, (year, month) in enumerate(FILES, 1):
             os.remove(tmp_path)
 
 # ============================================================
-# COPY INTO RAW TABLE
+# COPY INTO RAW TABLE (fichier par fichier)
 # ============================================================
 
-print("📥 Chargement vers table RAW...")
+print("📥 Chargement vers table RAW...\n")
+
+
+staged_files = cursor.fetchall()
 
 cursor.execute(f"""
 COPY INTO {TABLE_NAME}
 FROM @{STAGE_NAME}
-FILE_FORMAT = (TYPE = PARQUET)
+FILE_FORMAT = (TYPE = PARQUET  USE_LOGICAL_TYPE = TRUE)
 MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
 ON_ERROR = CONTINUE
 """)
 
-result = cursor.fetchall()
-print("✅ COPY INTO terminé")
+print("\n✅ Chargement terminé\n")
 
 # ============================================================
 # VERIFICATION
