@@ -1,4 +1,4 @@
-
+# dbt_project.yml
 # Name your project! Project names should contain only lowercase characters
 # and underscores. A good package name should reflect your organization's
 # name or the intended use of these models
@@ -22,8 +22,8 @@ models:
   nyc_taxi_dbt:
     # Config indicated by + and applies to all files under models/example/
     staging:
-      +schema: STAGING          # écrit dans NYC_TAXI_DB.STAGING
-      +materialized: view       # staging = vues (pas de stockage)
+      +schema: STAGING
+      +materialized: table
     final:
-      +schema: FINAL            # écrit dans NYC_TAXI_DB.FINAL
-      +materialized: table      # final = tables matérialisées
+      +schema: FINAL
+      +materialized: table

@@ -1,0 +1,69 @@
+# models/final/schema.yml
+version: 2
+
+models:
+
+  - name: daily_summary
+    description: "Agrégations journalières : volume de trajets, revenus, qualité de service."
+    columns:
+      - name: pickup_date
+        tests: [not_null, unique]
+      - name: trip_count
+        tests: [not_null]
+      - name: total_revenue
+        tests: [not_null]
+
+  - name: zone_analysis
+    description: "Activité par zone TLC en pickup et en dropoff : revenus, distances, part aéroport."
+    columns:
+      - name: zone_id
+        tests: [not_null]
+      - name: zone_role
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['pickup', 'dropoff']
+      - name: trip_count
+        tests: [not_null]
+
+  - name: hourly_patterns
+    description: "Patterns de demande par heure, jour de semaine et période de la journée."
+    columns:
+      - name: pickup_hour
+        tests: [not_null]
+      - name: pickup_weekday
+        tests: [not_null]
+      - name: trip_count
+        tests: [not_null]
+
+  - name: vendor_performance
+    description: "Comparaison des 4 fournisseurs TPEP : parts de marché, revenus, qualité de service."
+    columns:
+      - name: vendorid
+        tests: [not_null, unique]
+      - name: vendor_name
+        tests: [not_null]
+      - name: trip_count
+        tests: [not_null]
+
+  - name: payment_analysis
+    description: "Distribution mensuelle des modes de paiement et comportement de pourboire."
+    columns:
+      - name: pickup_year
+        tests: [not_null]
+      - name: pickup_month
+        tests: [not_null]
+      - name: payment_type_label
+        tests: [not_null]
+      - name: trip_count
+        tests: [not_null]
+
+  - name: monthly_kpi
+    description: "KPIs mensuels 2024-2025 : évolution du volume, des revenus et impact CBD congestion fee."
+    columns:
+      - name: pickup_year
+        tests: [not_null]
+      - name: pickup_month
+        tests: [not_null]
+      - name: trip_count
+        tests: [not_null]
