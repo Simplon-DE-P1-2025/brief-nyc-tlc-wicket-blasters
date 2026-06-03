@@ -1,0 +1,52 @@
+name: DBT CI - Staging
+
+# Se déclenche sur chaque Pull Request ciblant master.
+# Valide uniquement la couche staging (le schéma Final n'est pas encore mergé).
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  dbt-ci:
+    # Runner : VM Ubuntu fournie gratuitement par GitHub Actions
+    runs-on: ubuntu-latest
+
+    # Variables d'environnement injectées depuis les secrets du repo GitHub.
+    # À configurer dans : Settings → Secrets and variables → Actions
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+
+    steps:
+      # Clone le repo dans le runner pour que les étapes suivantes aient accès au code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Installe Python 3.11 sur le runner
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # On installe uniquement dbt-snowflake, pas tout requirements.txt
+      # (jupyter, matplotlib, etc. sont inutiles en CI et alourdiraient le runner)
+      - name: Install dbt-snowflake
+        run: pip install dbt-snowflake==1.11.5
+
+      # Installe les éventuels packages déclarés dans packages.yml
+      - name: dbt deps
+        working-directory: nyc_taxi_dbt
+        run: dbt deps --profiles-dir .
+
+      # --profiles-dir . indique à dbt de lire profiles.yml depuis nyc_taxi_dbt/
+      # au lieu de ~/.dbt/ (emplacement par défaut)
+      - name: dbt run - staging
+        working-directory: nyc_taxi_dbt
+        run: dbt run --select staging --profiles-dir .
+
+      # Exécute les tests définis dans schema.yml (not_null, accepted_values, etc.)
+      - name: dbt test - staging
+        working-directory: nyc_taxi_dbt
+        run: dbt test --select staging --profiles-dir .
