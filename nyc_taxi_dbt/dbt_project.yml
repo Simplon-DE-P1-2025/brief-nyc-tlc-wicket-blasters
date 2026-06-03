@@ -12,15 +12,11 @@ profile: 'nyc_taxi_dbt'
 # The `model-paths` config, for example, states that models in this project can be
 # found in the "models/" directory. You probably won't need to change these!
 model-paths: ["models"]
-analysis-paths: ["analyses"]
-test-paths: ["tests"]
-macro-paths: ["macros"]
 
 # Configuring models
 # Full documentation: https://docs.getdbt.com/docs/configuring-models
 
-# In this example config, we tell dbt to build all models in the example/
-# directory as views. These settings can be overridden in the individual model
+# These settings can be overridden in the individual model
 # files using the `{{ config(...) }}` macro.
 models:
   nyc_taxi_dbt:
