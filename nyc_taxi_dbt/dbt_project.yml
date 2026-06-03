@@ -26,8 +26,8 @@ models:
   nyc_taxi_dbt:
     # Config indicated by + and applies to all files under models/example/
     staging:
-          +schema: STAGING          # écrit dans NYC_TAXI_DB.STAGING
-          +materialized: view       # staging = vues (pas de stockage)
-        final:
-          +schema: FINAL            # écrit dans NYC_TAXI_DB.FINAL
-          +materialized: table      # final = tables matérialisées
+      +schema: STAGING
+      +materialized: table
+    final:
+      +schema: FINAL
+      +materialized: table

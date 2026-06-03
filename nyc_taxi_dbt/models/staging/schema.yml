@@ -15,140 +15,251 @@ models:
       Données Yellow Taxi nettoyées et enrichies.
       Basées sur le Data Dictionary TLC du 18 mars 2025
       et les règles de qualité appliquées dans le projet.
+      Inclut des labels métier lisibles, des flags analytiques,
+      et des métriques financières dérivées prêtes pour la couche FINAL.
 
     columns:
 
+      # ----------------------------------------------------------
+      # Identifiants & fournisseur
+      # ----------------------------------------------------------
       - name: vendorid
         description: >
           Fournisseur TPEP ayant généré l'enregistrement.
-          1 = Creative Mobile Technologies
-          2 = Curb Mobility
-          6 = Myle Technologies
-          7 = Helix
+          1=Creative Mobile Technologies, 2=Curb Mobility,
+          6=Myle Technologies, 7=Helix
         tests:
           - accepted_values:
-              values: [1, 2, 6, 7]
+              arguments:
+                values: [1, 2, 6, 7]
 
+      - name: vendor_name
+        description: "Nom lisible du fournisseur TPEP."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 'Creative Mobile Technologies'
+                  - 'Curb Mobility'
+                  - 'Myle Technologies'
+                  - 'Helix'
+
+      # ----------------------------------------------------------
+      # Horodatages & dimensions temporelles
+      # ----------------------------------------------------------
       - name: pickup_datetime
-        description: >
-          Date et heure de prise en charge du passager.
+        description: "Date et heure de prise en charge du passager."
         tests:
           - not_null
 
       - name: dropoff_datetime
-        description: >
-          Date et heure de dépose du passager.
+        description: "Date et heure de dépose du passager."
         tests:
           - not_null
 
+      - name: pickup_date
+        description: "Date (sans heure) de prise en charge. Utile pour les agrégations journalières."
+        tests:
+          - not_null
+
+      - name: pickup_year
+        description: "Année de prise en charge."
+
+      - name: pickup_month
+        description: "Mois de prise en charge (1-12)."
+
+      - name: pickup_day
+        description: "Jour du mois de prise en charge."
+
+      - name: pickup_hour
+        description: "Heure de prise en charge (0-23)."
+
+      - name: pickup_weekday
+        description: "Jour de la semaine de prise en charge (Mon, Tue, …, Sun)."
+
+      - name: time_period
+        description: "Période de la journée : Morning (6-11h), Afternoon (12-17h), Evening (18-22h), Night."
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['Morning', 'Afternoon', 'Evening', 'Night']
+
+      - name: is_weekend
+        description: "TRUE si le trajet a lieu un samedi ou dimanche."
+        tests:
+          - not_null
+
+      - name: is_rush_hour
+        description: "TRUE si prise en charge en heure de pointe NYC (lun-ven, 7h-9h ou 16h-19h)."
+        tests:
+          - not_null
+
+      # ----------------------------------------------------------
+      # Métriques de trajet
+      # ----------------------------------------------------------
       - name: passenger_count
-        description: >
-          Nombre de passagers transportés.
+        description: "Nombre de passagers transportés (filtré > 0)."
 
       - name: trip_distance
-        description: >
-          Distance du trajet en miles.
-          Filtrée dans le modèle de staging.
+        description: "Distance du trajet en miles (filtrée 0.01–200)."
         tests:
           - not_null
-
-      - name: ratecodeid
-        description: >
-          Code tarifaire final appliqué au trajet.
-        tests:
-          - accepted_values:
-              values: [1, 2, 3, 4, 5, 6, 99]
-
-      - name: store_and_fwd_flag
-        description: >
-          Y = trajet stocké localement avant transmission.
-          N = transmis directement.
-
-      - name: pulocationid
-        description: >
-          Zone TLC de prise en charge.
-
-      - name: dolocationid
-        description: >
-          Zone TLC de dépose.
-
-      - name: payment_type
-        description: >
-          Mode de paiement.
-        tests:
-          - not_null
-          - accepted_values:
-              values: [0, 1, 2, 3, 4, 5, 6]
-
-      - name: fare_amount
-        description: >
-          Tarif calculé par le taximètre.
-        tests:
-          - not_null
-
-      - name: extra
-        description: >
-          Suppléments et surcharges diverses.
-
-      - name: mta_tax
-        description: >
-          Taxe MTA appliquée automatiquement.
-
-      - name: tip_amount
-        description: >
-          Pourboire enregistré (CB uniquement).
-
-      - name: tolls_amount
-        description: >
-          Total des péages.
-
-      - name: improvement_surcharge
-        description: >
-          Surcharge d'amélioration appliquée depuis 2015.
-
-      - name: congestion_surcharge
-        description: >
-          Surcharge de congestion de l'État de New York.
-
-      - name: airport_fee
-        description: >
-          Frais d'aéroport JFK/LGA.
-
-      - name: cbd_congestion_fee
-        description: >
-          Péage de congestion MTA appliqué depuis le
-          5 janvier 2025.
-
-      - name: total_amount
-        description: >
-          Montant total facturé au passager.
-
-      # Colonnes calculées dans le modèle DBT
 
       - name: trip_duration_minutes
-        description: >
-          Durée du trajet en minutes.
+        description: "Durée du trajet en minutes, calculée depuis pickup/dropoff (filtrée 1–300 min)."
         tests:
           - not_null
 
       - name: avg_speed_mph
-        description: >
-          Vitesse moyenne calculée.
-
-      - name: tip_rate
-        description: >
-          Pourcentage du pourboire par rapport au tarif.
+        description: "Vitesse moyenne calculée en mph. NULL si durée nulle."
 
       - name: distance_category
-        description: >
-          Catégorie de distance calculée.
+        description: "Catégorie de distance : Short (<1mi), Medium (<5), Long (<20), Very Long (≥20)."
         tests:
           - accepted_values:
-              values: ['Short', 'Medium', 'Long', 'Very Long']
+              arguments:
+                values: ['Short', 'Medium', 'Long', 'Very Long']
 
-      - name: time_period
-        description: >
-          Période de la journée calculée.
+      # ----------------------------------------------------------
+      # Localisation & tarification
+      # ----------------------------------------------------------
+      - name: ratecodeid
+        description: "Code tarifaire final appliqué au trajet."
         tests:
           - accepted_values:
-              values: ['Morning', 'Afternoon', 'Evening', 'Night']
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 99]
+
+      - name: ratecode_label
+        description: "Libellé lisible du code tarifaire (Standard Rate, JFK, Newark, …)."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 'Standard Rate'
+                  - 'JFK'
+                  - 'Newark'
+                  - 'Nassau/Westchester'
+                  - 'Negotiated Fare'
+                  - 'Group Ride'
+                  - 'Unknown'
+
+      - name: trip_type
+        description: "Classification analytique du trajet basée sur le RatecodeID."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 'Standard'
+                  - 'Airport JFK'
+                  - 'Airport Newark'
+                  - 'Nassau/Westchester'
+                  - 'Negotiated'
+                  - 'Group Ride'
+
+      - name: is_airport_trip
+        description: "TRUE si le trajet est vers/depuis JFK ou Newark (RatecodeID 2/3 ou airport_fee > 0)."
+        tests:
+          - not_null
+
+      - name: store_and_fwd_flag
+        description: "Y=trajet stocké localement avant transmission, N=transmis directement."
+
+      - name: is_store_and_fwd
+        description: "TRUE si le trajet a été stocké localement (store_and_fwd_flag = 'Y')."
+        tests:
+          - not_null
+
+      - name: pulocationid
+        description: "Zone TLC de prise en charge."
+
+      - name: dolocationid
+        description: "Zone TLC de dépose."
+
+      # ----------------------------------------------------------
+      # Paiement & tarification
+      # ----------------------------------------------------------
+      - name: payment_type
+        description: "Code du mode de paiement."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5, 6]
+
+      - name: payment_type_label
+        description: "Libellé lisible du mode de paiement (Credit Card, Cash, Flex Fare, …)."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 'Flex Fare'
+                  - 'Credit Card'
+                  - 'Cash'
+                  - 'No Charge'
+                  - 'Dispute'
+                  - 'Unknown'
+                  - 'Voided Trip'
+
+      - name: fare_amount
+        description: "Tarif calculé par le taximètre (filtré 0–500)."
+        tests:
+          - not_null
+
+      - name: tip_amount
+        description: "Pourboire enregistré (CB uniquement — les tips cash ne sont pas inclus)."
+
+      - name: tip_rate
+        description: "Pourcentage du pourboire par rapport au tarif compteur."
+
+      - name: has_tip
+        description: "TRUE si un pourboire a été enregistré (tip_amount > 0)."
+        tests:
+          - not_null
+
+      - name: total_amount
+        description: "Montant total facturé au passager (hors tips cash, filtré 0–500)."
+        tests:
+          - not_null
+
+      - name: extra
+        description: "Suppléments et surcharges diverses."
+
+      - name: mta_tax
+        description: "Taxe MTA appliquée automatiquement selon le tarif compteur."
+
+      - name: tolls_amount
+        description: "Total des péages payés."
+
+      - name: improvement_surcharge
+        description: "Surcharge d'amélioration appliquée depuis 2015."
+
+      - name: congestion_surcharge
+        description: "Surcharge de congestion de l'État de New York."
+
+      - name: airport_fee
+        description: "Frais d'aéroport pour prise en charge à JFK ou LaGuardia uniquement."
+
+      - name: cbd_congestion_fee
+        description: "Péage de congestion MTA (Congestion Relief Zone) depuis le 5 janvier 2025. 0 pour les trajets 2024."
+
+      - name: total_surcharges
+        description: >
+          Somme de toutes les surcharges : extra + mta_tax + improvement_surcharge
+          + congestion_surcharge + cbd_congestion_fee. Exclut le tarif de base et le pourboire.
+
+      - name: base_fare_ratio
+        description: "Part du tarif compteur dans le montant total facturé (fare/total * 100). NULL si total = 0."
+
+      # ----------------------------------------------------------
+      # Métadonnées ingestion
+      # ----------------------------------------------------------
+      - name: _source_file
+        description: "Nom du fichier Parquet source chargé depuis le stage Snowflake."
+
+      - name: _loaded_at
+        description: "Horodatage de chargement en RAW."
