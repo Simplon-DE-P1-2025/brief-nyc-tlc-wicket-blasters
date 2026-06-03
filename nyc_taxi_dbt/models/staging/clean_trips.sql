@@ -1,4 +1,4 @@
--- models/staging/stg_yellow_trips.sql
+-- models/staging/clean_trips.sql
 -- ============================================================
 -- STAGING : Nettoyage et enrichissement des données brutes
 -- Source : NYC TLC Yellow Taxi Trip Records

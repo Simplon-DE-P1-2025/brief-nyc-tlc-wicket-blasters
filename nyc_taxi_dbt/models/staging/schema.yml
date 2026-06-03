@@ -10,7 +10,7 @@ sources:
         description: "Données brutes Yellow Taxi NYC 2024-2025"
 
 models:
-  - name: stg_yellow_trips
+  - name: clean_trips
     description: >
       Données Yellow Taxi nettoyées et enrichies.
       Basées sur le Data Dictionary TLC du 18 mars 2025
