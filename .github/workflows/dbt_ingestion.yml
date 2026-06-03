@@ -1,0 +1,71 @@
+name: ETL Complet - Ingestion RAW + DBT
+
+# Déclenché manuellement depuis l'onglet Actions sur GitHub.
+# À lancer une fois au démarrage, puis chaque mois quand TLC publie de nouveaux fichiers.
+# Ne pas déclencher automatiquement sur push : le script télécharge ~15 fichiers Parquet
+# (plusieurs centaines de MB) et tourne 15-30 minutes.
+on:
+  # Déclenchement manuel depuis l'onglet Actions sur GitHub
+  workflow_dispatch:
+  # Déclenchement automatique le 10 de chaque mois à 6h UTC
+  # TLC publie généralement les données du mois précédent autour du J+7/J+10
+  schedule:
+    - cron: '0 6 10 * *'
+
+jobs:
+  etl-full:
+    # Runner : VM Ubuntu fournie gratuitement par GitHub Actions
+    runs-on: ubuntu-latest
+
+    # Variables d'environnement injectées depuis les secrets du repo GitHub.
+    # À configurer dans : Settings → Secrets and variables → Actions
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_WAREHOUSE: NYC_TAXI_WH
+      SNOWFLAKE_DATABASE: NYC_TAXI_DB
+      SNOWFLAKE_SCHEMA: RAW
+      SNOWFLAKE_ROLE: SYSADMIN
+
+    steps:
+      # Clone le repo dans le runner pour accéder aux scripts
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Installe Python 3.11 sur le runner
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # On installe uniquement les dépendances nécessaires au script d'ingestion
+      # (pas tout requirements.txt qui contient jupyter, matplotlib, etc.)
+      - name: Install Python dependencies
+        run: pip install snowflake-connector-python requests python-dotenv
+
+      # Étape 1 : télécharge les fichiers Parquet depuis NYC TLC et les charge dans RAW
+      # Attention : truncate la table avant de recharger (comportement voulu pour la fraîcheur des données)
+      - name: Ingestion RAW - chargement Snowflake
+        run: python python/load_datasets_to_snowflake.py
+
+      # Étape 2 : installe dbt après l'ingestion pour enchaîner les transformations
+      - name: Install dbt-snowflake
+        run: pip install dbt-snowflake==1.11.5
+
+      # Installe les éventuels packages déclarés dans packages.yml
+      - name: dbt deps
+        working-directory: nyc_taxi_dbt
+        run: dbt deps --profiles-dir .
+
+      # Étape 3 : transformations dbt sur les données fraîchement chargées
+      # Pas de --select : tourne tous les modèles (staging + final)
+      # --profiles-dir . indique à dbt de lire profiles.yml depuis nyc_taxi_dbt/
+      - name: dbt run - all models
+        working-directory: nyc_taxi_dbt
+        run: dbt run --profiles-dir .
+
+      # Étape 4 : validation qualité sur tous les modèles
+      - name: dbt test - all models
+        working-directory: nyc_taxi_dbt
+        run: dbt test --profiles-dir .
