@@ -64,6 +64,8 @@ NYC TLC (Parquet)
 │   ├── analyses/queries_final.sql
 │   ├── dbt_project.yml
 │   └── profiles.yml
+├── monitoring/
+│   └── pipeline_monitor.py
 ├── python/
 │   └── load_datasets_to_snowflake.py
 ├── dashboard.py
@@ -264,21 +266,102 @@ Interface analytique connectée directement à Snowflake. Navigation par section
 
 ---
 
+## Monitoring Streamlit in Snowflake
+
+**Fichier :** [`monitoring/pipeline_monitor.py`](monitoring/pipeline_monitor.py)
+
+Dashboard de surveillance de la santé du pipeline, conçu pour être déployé comme application **Streamlit in Snowflake** (sans configuration de connexion : la session Snowpark est récupérée nativement via `get_active_session()`).
+
+### Sections
+
+| Section | Contenu |
+|---|---|
+| Ingestion RAW | Dernière date d'ingestion, nombre de fichiers chargés, volume total de lignes brutes |
+| Qualité — RAW vs STAGING | Lignes clean_trips, lignes rejetées par les filtres qualité dbt, taux de rétention |
+| Détail par fichier source | Bar chart + tableau des lignes chargées par fichier mensuel (ex : `yellow_tripdata_2024-01.parquet`) |
+| Tables FINAL | Comptage de chaque table FINAL avec la cardinalité attendue en tooltip (ex : 168 lignes pour `HOURLY_PATTERNS`) |
+
+### Déploiement dans Snowflake
+
+1. Dans l'interface Snowflake, aller dans **Projects → Streamlit**.
+2. Créer une nouvelle application Streamlit (rôle `SYSADMIN`, warehouse `NYC_TAXI_WH`, database `NYC_TAXI_DB`).
+3. Copier intégralement le contenu de [`monitoring/pipeline_monitor.py`](monitoring/pipeline_monitor.py) dans l'éditeur de l'application.
+4. Cliquer sur **Run** — aucun package supplémentaire ni variable d'environnement n'est nécessaire.
+
+> **Usage local (optionnel) :** remplacer le bloc `get_active_session()` par une connexion `snowflake.connector` standard (instructions commentées en tête du fichier) puis lancer `streamlit run monitoring/pipeline_monitor.py`.
+
+---
+
 ## CI/CD GitHub Actions
 
-| Fichier | Déclencheur | Description |
-|---|---|---|
-| `dbt_ci.yml` | Pull Request vers master | Compile et teste uniquement la couche staging |
-| `dbt_cd.yml` | Push vers master | Déploie toutes les tables (staging + final) + tests |
-| `dbt_ingestion.yml` | Manuel + cron mensuel (10 du mois) | Pipeline complet : ingestion Python → dbt run → dbt test |
+Trois workflows automatisent l'intégration, le déploiement et l'ingestion. Les credentials Snowflake sont injectés via les secrets du dépôt (`Settings → Secrets and variables → Actions`) et jamais écrits en clair dans les fichiers YAML.
 
-Secrets GitHub requis :
+**Secrets GitHub requis :**
 
 ```
-SNOWFLAKE_ACCOUNT
-SNOWFLAKE_USER
-SNOWFLAKE_PASSWORD
+SNOWFLAKE_ACCOUNT   # identifiant du compte (ex : ab12345.eu-west-1)
+SNOWFLAKE_USER      # utilisateur Snowflake
+SNOWFLAKE_PASSWORD  # mot de passe associé
 ```
+
+> `dbt_ingestion.yml` injecte en plus `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA` et `SNOWFLAKE_ROLE` en variables d'environnement pour le script Python d'ingestion.
+
+---
+
+### `dbt_ci.yml` — Intégration continue (Pull Request)
+
+**Déclencheur :** toute Pull Request ciblant `master`.
+
+**Objectif :** valider rapidement la couche staging avant le merge, sans toucher aux tables FINAL de production.
+
+| Étape | Action |
+|---|---|
+| Checkout | Clone le dépôt sur le runner Ubuntu |
+| Setup Python 3.11 | Installe l'interpréteur Python sur la VM |
+| Install dbt-snowflake | `pip install dbt-snowflake==1.11.5` — seul paquet nécessaire (pas de jupyter ni matplotlib) |
+| dbt deps | Résout les packages déclarés dans `packages.yml` |
+| dbt run — staging | `dbt run --select staging` — construit uniquement `STAGING.CLEAN_TRIPS` |
+| dbt test — staging | `dbt test --select staging` — vérifie les contraintes `not_null` et `accepted_values` sur `clean_trips` |
+
+---
+
+### `dbt_cd.yml` — Déploiement continu (Push sur master)
+
+**Déclencheur :** chaque push ou merge de PR sur la branche `master`.
+
+**Objectif :** reconstruire et valider l'ensemble du pipeline dbt (toutes les couches) dès qu'une modification est intégrée.
+
+| Étape | Action |
+|---|---|
+| Checkout | Clone le dépôt sur le runner Ubuntu |
+| Setup Python 3.11 | Installe l'interpréteur Python sur la VM |
+| Install dbt-snowflake | `pip install dbt-snowflake==1.11.5` |
+| dbt deps | Résout les packages déclarés dans `packages.yml` |
+| dbt run — all models | `dbt run` sans `--select` : reconstruit staging **et** les 6 tables FINAL |
+| dbt test — all models | `dbt test` sur tous les modèles — échoue le workflow si un test de qualité est violé |
+
+---
+
+### `dbt_ingestion.yml` — ETL complet (mensuel + manuel)
+
+**Déclencheurs :**
+- **Manuel** — depuis l'onglet *Actions* du dépôt (`workflow_dispatch`).
+- **Automatique** — cron `0 6 10 * *` : le 10 de chaque mois à 6h UTC (TLC publie les données du mois précédent autour de J+7/J+10).
+
+**Objectif :** pipeline de bout en bout — téléchargement des fichiers Parquet TLC, chargement dans Snowflake, puis transformations dbt complètes.
+
+> Ce workflow télécharge ~15 fichiers Parquet (plusieurs centaines de Mo) et tourne entre 15 et 30 minutes. Il n'est **pas** déclenché sur push pour éviter des exécutions inutiles.
+
+| Étape | Action |
+|---|---|
+| Checkout | Clone le dépôt sur le runner Ubuntu |
+| Setup Python 3.11 | Installe l'interpréteur Python sur la VM |
+| Install Python dependencies | `pip install snowflake-connector-python requests python-dotenv` — dépendances minimales pour le script d'ingestion |
+| Ingestion RAW | `python python/load_datasets_to_snowflake.py` — télécharge les fichiers TLC, les charge en stage interne Snowflake, puis `COPY INTO RAW.YELLOW_TAXI_TRIPS` (truncate + reload) |
+| Install dbt-snowflake | `pip install dbt-snowflake==1.11.5` — installé après l'ingestion pour ne pas alourdir l'étape Python |
+| dbt deps | Résout les packages déclarés dans `packages.yml` |
+| dbt run — all models | `dbt run` sur toutes les couches (staging + final) depuis les données fraîchement chargées |
+| dbt test — all models | Validation qualité globale — le workflow échoue si un test est violé |
 
 ---
 
