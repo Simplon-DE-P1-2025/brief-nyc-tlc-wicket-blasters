@@ -402,6 +402,13 @@ Le fichier [`nyc_taxi_dbt/analyses/queries_final.sql`](nyc_taxi_dbt/analyses/que
 | Data Dictionary | `Docs/data_dictionary_trip_records_yellow.pdf` (mars 2025) |
 
 ---
+## Screenshots
+
+### Monitoring
+
+![Monitoring](screenshots/monitoring.png)
+
+---
 
 ## Equipe
 
