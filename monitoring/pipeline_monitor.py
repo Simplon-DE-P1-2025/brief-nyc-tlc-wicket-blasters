@@ -19,6 +19,13 @@ session = get_active_session()
 def query(sql):
     return session.sql(sql).to_pandas()
 
+def fmt(n):
+    if abs(n) >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    elif abs(n) >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
 # -------------------------------------------------------------
 # Page
 # -------------------------------------------------------------
@@ -41,7 +48,7 @@ df_raw = query("""
 col1, col2, col3 = st.columns(3)
 col1.metric("Dernière ingestion",   str(df_raw["DERNIERE_INGESTION"][0])[:16])
 col2.metric("Fichiers chargés",     int(df_raw["FICHIERS_CHARGES"][0]))
-col3.metric("Lignes brutes (RAW)",  f"{int(df_raw['TOTAL_LIGNES'][0]):,}")
+col3.metric("Lignes brutes (RAW)",  fmt(int(df_raw['TOTAL_LIGNES'][0])))
 
 # -------------------------------------------------------------
 # Section 2 : Taux de rétention RAW → STAGING
@@ -59,8 +66,8 @@ rejets        = raw_count - staging_count
 taux          = round(staging_count / raw_count * 100, 1) if raw_count > 0 else 0
 
 col1, col2, col3 = st.columns(3)
-col1.metric("Lignes STAGING (clean_trips)", f"{staging_count:,}")
-col2.metric("Lignes rejetées",              f"{rejets:,}")
+col1.metric("Lignes STAGING (clean_trips)", fmt(staging_count))
+col2.metric("Lignes rejetées",              fmt(rejets))
 col3.metric("Taux de rétention",            f"{taux} %")
 
 # -------------------------------------------------------------
@@ -88,6 +95,16 @@ st.dataframe(df_files, use_container_width=True)
 # -------------------------------------------------------------
 st.header("Tables FINAL")
 
+# Valeurs de référence attendues par table
+EXPECTED = {
+    "DAILY_SUMMARY":     "~460 (1 ligne / jour)",
+    "HOURLY_PATTERNS":   "168 (24h × 7 jours)",
+    "MONTHLY_KPI":       "15 (1 ligne / mois chargé)",
+    "PAYMENT_ANALYSIS":  "~64 (types paiement × mois)",
+    "VENDOR_PERFORMANCE": "4 (fournisseurs TLC)",
+    "ZONE_ANALYSIS":     "526 (263 zones × 2 rôles)",
+}
+
 final_tables = [
     "DAILY_SUMMARY",
     "HOURLY_PATTERNS",
@@ -101,6 +118,11 @@ cols = st.columns(len(final_tables))
 for i, table in enumerate(final_tables):
     try:
         df = query(f"SELECT COUNT(*) AS n FROM NYC_TAXI_DB.FINAL.{table}")
-        cols[i].metric(table.replace("_", " ").title(), f"{int(df['N'][0]):,}")
+        actual = int(df["N"][0])
+        cols[i].metric(
+            label=table.replace("_", " ").title(),
+            value=f"{actual:,}",
+            help=f"Attendu : {EXPECTED[table]}",
+        )
     except Exception:
         cols[i].metric(table.replace("_", " ").title(), "N/A")
