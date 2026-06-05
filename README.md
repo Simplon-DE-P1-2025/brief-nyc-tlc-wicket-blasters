@@ -404,6 +404,20 @@ Le fichier [`nyc_taxi_dbt/analyses/queries_final.sql`](nyc_taxi_dbt/analyses/que
 ---
 ## Screenshots
 
+### Espace de travail partagé Snowflake
+
+Le projet a été développé en équipe sur un **compte Snowflake partagé**. Chaque membre du groupe disposait d'un utilisateur dédié créé avec le rôle `SYSADMIN` et le warehouse `COMPUTE_WH`, configuré via le script [`Snowflake/00-Comptes.sql`](Snowflake/00-Comptes.sql).
+
+Les worksheets SQL (numérotées de `00-Comptes.sql` à `11-sql_requests.sql`) ont servi d'espace de travail collaboratif, permettant à l'équipe d'exécuter et valider chaque étape du pipeline directement dans l'interface Snowflake avant d'intégrer les modèles dans dbt.
+
+![Worksheets Snowflake partagées](screenshots/snowflake_workspace.png)
+
+La base `NYC_TAXI_DB` héberge les trois schémas du pipeline — `RAW`, `STAGING` et `FINAL` — tous visibles et accessibles à tous les membres depuis le **Database Explorer** de l'interface Snowflake.
+
+![Explorateur de base de données Snowflake](screenshots/snowflake_db_explorer.png)
+
+---
+
 ### Monitoring
 
 ![Monitoring](screenshots/monitoring.png)
